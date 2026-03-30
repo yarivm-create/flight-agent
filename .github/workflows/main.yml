@@ -2,14 +2,19 @@ name: Flight Check Agent
 on:
   schedule:
     - cron: '0 * * * *' # ירוץ כל שעה עגולה
-  workflow_dispatch: # מאפשר לך להריץ ידנית לבדיקה
+  workflow_dispatch: # מאפשר הרצה ידנית
+  
+env:
+  # פותר את אזהרת ה-Deprecation ומכריח שימוש ב-Node 24
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   run-agent:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4 # עודכן מ-v3 ל-v4
-      - uses: actions/setup-node@v4 # עודכן מ-v3 ל-v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 24 # שדרגנו גם את גרסת ה-Node ל-24
+          node-version: 24
       - run: npm install
       - run: node index.js
