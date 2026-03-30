@@ -1,12 +1,12 @@
 name: Flight Check Agent
 on:
   schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *' # ירוץ כל שעה עגולה
+  workflow_dispatch: # כפתור להרצה ידנית ב-Actions
   
 env:
-  # מאפשר שימוש בגרסאות Node שלא נחשבות ל-Default הבטוח של GitHub כרגע
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   run-agent:
