@@ -1,12 +1,12 @@
 name: Flight Check Agent
 on:
   schedule:
-    - cron: '0 * * * *' # ירוץ כל שעה עגולה
-  workflow_dispatch: # מאפשר הרצה ידנית
+    - cron: '0 * * * *'
+  workflow_dispatch:
   
 env:
-  # פותר את אזהרת ה-Deprecation ומכריח שימוש ב-Node 24
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  # מאפשר שימוש בגרסאות Node שלא נחשבות ל-Default הבטוח של GitHub כרגע
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
 
 jobs:
   run-agent:
