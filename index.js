@@ -1,69 +1,77 @@
+const puppeteer = require('puppeteer');
 const axios = require('axios');
 
-// הגדרות אישיות
 const TELEGRAM_TOKEN = '8456860842:AAHF8hKUb-W9vVBO2N3ykcKLge14ObrtrXA';
-const CHAT_ID = '858419911'; 
+const CHAT_ID = '858419911';
 
-// פרמטרי חיפוש מורחבים
-const TARGET_DESTINATIONS = ['ATH', 'FCO']; // ATH = אתונה, FCO = רומא
-const START_DATE = '2026-03-30';
-const END_DATE = '2026-04-03';
-const AIRLINES = ['EL AL', 'ISRAIR', 'ARKIA', 'ELECTRA', '3E', 'BGH'];
+// הגדרות החיפוש שלך
+const DESTS = [
+    { code: 'ATH', name: 'אתונה', israirId: 422 },
+    { code: 'FCO', name: 'רומא', israirId: 802 },
+    { code: 'LCA', name: 'לרנקה', israirId: 931 },
+    { code: 'PFO', name: 'פאפוס', israirId: 3968 }
+];
+const DATES = ['20260331', '20260401', '20260402', '20260403', '20260404'];
 
-async function sendTelegram(message) {
+async function sendTelegram(msg) {
     try {
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-            chat_id: CHAT_ID,
-            text: message,
-            parse_mode: 'Markdown'
+            chat_id: CHAT_ID, text: msg, parse_mode: 'Markdown'
         });
-    } catch (e) {
-        console.error("Telegram Error:", e.response ? e.response.data : e.message);
-    }
+    } catch (e) { console.error("Telegram error"); }
 }
 
-async function checkFlights() {
+async function checkAvailability(url, selector, siteName) {
+    const browser = await puppeteer.launch({
+        headless: "new",
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
     try {
-        console.log("סורק לוח טיסות עבור אתונה ורומא...");
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
         
-        const RESOURCE_ID = 'e83f763b-b7d7-479e-b172-ae981ddc6de5'; 
-        const url = `https://data.gov.il/api/3/action/datastore_search?resource_id=${RESOURCE_ID}&limit=1000`;
-        
-        const response = await axios.get(url);
-        const flights = response.data.result.records;
+        // ממתינים קצת שהמחירים יטענו
+        await new Promise(r => setTimeout(r, 5000));
 
-        let foundMessages = [];
-        let totalScanned = flights.length;
+        const isAvailable = await page.evaluate((sel) => {
+            const content = document.body.innerText;
+            // בדיקה אם יש סימני מחיר או אלמנטים של טיסה
+            return content.includes('₪') || content.includes('$') || !!document.querySelector(sel);
+        }, selector);
 
-        flights.forEach(f => {
-            if (!f.CHSTOT || !f.CHLOC1) return;
-
-            const flightDate = f.CHSTOT.split('T')[0];
-            const destination = f.CHLOC1; 
-            const airline = f.CHOPER || "";
-            const flightNum = f.CHFLTN || "";
-
-            // בדיקה אם התאריך בטווח והיעד הוא אחד מהשניים
-            if (flightDate >= START_DATE && flightDate <= END_DATE && TARGET_DESTINATIONS.includes(destination)) {
-                const isRelevant = AIRLINES.some(a => airline.toUpperCase().includes(a));
-                if (isRelevant) {
-                    const destName = destination === 'ATH' ? 'אתונה 🇬🇷' : 'רומא 🇮🇹';
-                    const status = f.CHRMINE || 'מתוכנן';
-                    foundMessages.push(`✈️ *טיסה ל${destName} נמצאה!*\nחברה: ${airline}\nמספר: ${flightNum}\nתאריך: ${flightDate}\nשעה: ${f.CHSTOT.split('T')[1].substring(0,5)}\nסטטוס: ${status}`);
-                }
-            }
-        });
-
-        if (foundMessages.length > 0) {
-            await sendTelegram(`📢 *עדכון סוכן הטיסות (אתונה & רומא):*\n\n` + foundMessages.join('\n---\n'));
-        } else {
-            await sendTelegram(`✅ *הסוכן פעיל:* נסרקו ${totalScanned} טיסות. לא נמצאו כרגע טיסות חדשות לאתונה או רומא בטווח המבוקש.`);
-        }
-
-    } catch (error) {
-        console.error("Error:", error.message);
-        await sendTelegram(`⚠️ *שגיאה בסוכן:* ${error.message}`);
+        await browser.close();
+        return isAvailable;
+    } catch (e) {
+        await browser.close();
+        return false;
     }
 }
 
-checkFlights();
+async function run() {
+    await sendTelegram("🔍 *הסוכן התחיל סריקת עומק באתרים (ארקיע וישראייר)...*");
+    
+    for (const dest of DESTS) {
+        for (const date of DATES) {
+            // בדיקת ארקיע
+            const arkiaUrl = `https://www.arkia.com/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1`;
+            const arkiaAvail = await checkAvailability(arkiaUrl, '.flight-row', 'ארקיע');
+            
+            if (arkiaAvail) {
+                await sendTelegram(`🔥 *נמצאה טיסה בארקיע!*\n📍 יעד: ${dest.name}\n📅 תאריך: ${date}\n👨‍👩‍👧‍👦 נוסעים: 4\n🔗 [להזמנה לחץ כאן](${arkiaUrl})`);
+            }
+
+            // בדיקת ישראייר (פורמט תאריך שונה)
+            const formattedDate = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
+            const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22cityCode%22:%22TLV%22%7D&destination=%7B%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId}%7D&startDate=${formattedDate}&adults=3&children=1`;
+            const israirAvail = await checkAvailability(israirUrl, '.flight-item', 'ישראייר');
+
+            if (israirAvail) {
+                await sendTelegram(`🔥 *נמצאה טיסה בישראייר!*\n📍 יעד: ${dest.name}\n📅 תאריך: ${formattedDate}\n👨‍👩‍👧‍👦 נוסעים: 4\n🔗 [להזמנה לחץ כאן](${israirUrl})`);
+            }
+        }
+    }
+    await sendTelegram("✅ *סריקת האתרים הושלמה.*");
+}
+
+run();
