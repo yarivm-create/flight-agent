@@ -1,10 +1,11 @@
 name: Flight Check Agent
 on:
   schedule:
-    - cron: '0 * * * *' # ירוץ כל שעה עגולה
-  workflow_dispatch: # כפתור להרצה ידנית ב-Actions
-  
+    - cron: '0 * * * *' # ממשיך לרוץ כל שעה עגולה
+  workflow_dispatch: # כפתור להרצה ידנית
+
 env:
+  # שומרים על ההגדרות שלך למניעת אזהרות ושדרוג ל-Node 24
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -13,8 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
-      - run: npm install
-      - run: node index.js
+          node-version: 24 # נשארים על גרסה 24 כמו שביקשת
+          
+      - name: Install dependencies
+        run: npm install
+        
+      - name: Install Puppeteer Browser
+        # זה החלק הקריטי שנוסף כדי שהסורק יוכל לפתוח את אתרי ארקיע וישראייר
+        run: npx puppeteer install
+        
+      - name: Run Scanner
+        run: node index.js
