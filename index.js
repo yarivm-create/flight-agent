@@ -36,7 +36,8 @@ async function checkAvailability(url) {
             const bodyText = document.body.innerText;
             const errorPhrases = [
                 "הפעם לא מצאנו", "נסו לשנות את היעד", "לצערנו לא נמצאו", 
-                "על פי הפרמטרים שהוזנו", "אזל", "טיסה מלאה", "לא נמצאו טיסות"
+                "על פי הפרמטרים שהוזנו", "אזל", "טיסה מלאה", "לא נמצאו טיסות",
+                "מספר המושבים הפנויים בטיסה קטן מהמבוקש בחיפוש"
             ];
             const hasError = errorPhrases.some(phrase => bodyText.includes(phrase));
             const hasPrice = bodyText.includes('₪') || bodyText.includes('$') || bodyText.includes('USD');
