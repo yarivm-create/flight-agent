@@ -5,7 +5,7 @@ const axios = require('axios');
 const TELEGRAM_TOKEN = '8456860842:AAHF8hKUb-W9vVBO2N3ykcKLge14ObrtrXA';
 const CHAT_ID = '858419911';
 
-// רשימת יעדים (קודים מותאמים לכל החברות)
+// רשימת יעדים
 const DESTS = [
     { code: 'ATH', name: 'אתונה 🇬🇷', israirId: 422, airHaifaCode: 'ATH' },
     { code: 'ROM', name: 'רומא 🇮🇹', israirId: 802, airHaifaCode: null },
@@ -36,66 +36,74 @@ async function checkAvailability(url) {
     });
     const page = await browser.newPage();
     try {
-        // מדמה דפדפן אנושי למניעת חסימות
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה של 15 שניות לטעינת מחירים וכפתורים דינמיים
+        // המתנה של 15 שניות לטעינת כל הרכיבים הדינמיים
         await new Promise(r => setTimeout(r, 15000));
 
         const result = await page.evaluate(() => {
             const bodyText = document.body.innerText;
             
-            // הודעות שמעידות שאין מקומות פנויים
+            // רשימת ביטויי חסימה - אם אחד מהם מופיע, הטיסה נחשבת לא זמינה
             const errorPhrases = [
-                "מצטערים, אין מקומות", "אזל", "טיסה מלאה", "לא נמצאו טיסות",
-                "No flights found", "Sold out", "נסו לשנות את היעד", "הפעם לא מצאנו"
+                "מצטערים, אין מקומות", 
+                "אזל", 
+                "טיסה מלאה", 
+                "הטיסה מלאה", 
+                "לא נמצאו טיסות",
+                "No flights found", 
+                "Sold out", 
+                "נסו לשנות את היעד", 
+                "הפעם לא מצאנו"
             ];
 
+            // בדיקה אם יש הודעת שגיאה/חסימה
             const hasError = errorPhrases.some(phrase => bodyText.includes(phrase));
             
-            // סימני הצלחה: מחיר (₪/$/ILS) או כפתור "בחירה"
+            // בדיקה אם יש סימני הצלחה (מחיר או כפתור בחירה)
             const hasPrice = bodyText.includes('₪') || 
                              bodyText.includes('$') || 
                              bodyText.includes('ILS') || 
                              bodyText.includes('USD') || 
                              bodyText.includes('בחירה');
 
-            return hasPrice && !hasError;
+            // לוגיקה סופית: חייב להיות מחיר, ואסור שתהיה הודעת "טיסה מלאה"
+            if (hasError) return false;
+            return hasPrice;
         });
 
         await browser.close();
         return result;
     } catch (e) {
-        await browser.close();
+        if (browser) await browser.close();
         return false;
     }
 }
 
 async function run() {
-    console.log("Starting scan for 4 passengers (3 Adults, 1 Child)...");
+    console.log("Starting master scan for 4 passengers (3 Adults, 1 Child)...");
     let results = [];
     
     for (const dest of DESTS) {
         for (const date of DATES) {
-            // הכנת פורמטים שונים של תאריכים עבור האתרים השונים
             const fmtDash = `${date.substring(0,4)}-${date.substring(4,6)}-${date.substring(6,8)}`;
             const fmtSlash = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
 
-            // 1. ארקיע (3 מבוגרים, 1 ילד)
+            // 1. ארקיע
             const arkiaUrl = `https://www.arkia.com/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1`;
             if (await checkAvailability(arkiaUrl)) {
                 results.push(`✈️ *ארקיע* | ${dest.name} | ${fmtSlash} [לינק](${arkiaUrl})`);
             }
 
-            // 2. ישראייר (3 מבוגרים, 1 ילד - מבנה מורכב)
-            const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22IATA%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:null,%22countryCode%22:null,%22countryId%22:null%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId},%22countryCode%22:null,%22countryId%22:null%7D&startDate=${fmtSlash}&adults=3&children=1`;
+            // 2. ישראייר
+            const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22IATA%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:null,%22countryCode%22:null,%22countryId%22:null%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code === 'ROM' ? 'ROM' : dest.code}%22,%22ltravelId%22:${dest.israirId},%22countryCode%22:null,%22countryId%22:null%7D&startDate=${fmtSlash}&adults=3&children=1`;
             if (await checkAvailability(israirUrl)) {
                 results.push(`✈️ *ישראייר* | ${dest.name} | ${fmtSlash} [לינק](${israirUrl})`);
             }
 
-            // 3. Air Haifa (3 מבוגרים, 1 ילד - כולל breakdown)
+            // 3. Air Haifa
             if (dest.airHaifaCode) {
                 const airHaifaUrl = `https://www.airhaifa.com/flight-results/TLV-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0?breakdown=%7B%7D`;
                 if (await checkAvailability(airHaifaUrl)) {
