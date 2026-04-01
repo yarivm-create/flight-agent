@@ -22,44 +22,48 @@ async function sendTelegram(msg) {
 }
 
 async function checkAvailability(url) {
-    const browser = await puppeteer.launch({
-        headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
+    let browser;
     try {
+        browser = await puppeteer.launch({
+            headless: "new",
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // טעינת הדף
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה של 20 שניות כדי לוודא שכל ה-"מדבקות" של טיסה מלאה נטענו
-        await new Promise(r => setTimeout(r, 20000));
+        // המתנה משמעותית (25 שניות) כדי שהאתר של ישראייר יסיים להדביק את המדבקות של "טיסה מלאה"
+        await new Promise(r => setTimeout(r, 25000));
 
-        const result = await page.evaluate(() => {
+        const isAvailable = await page.evaluate(() => {
             const bodyText = document.body.innerText;
             
-            // מילות פסילה מוחלטות (לפי צילומי המסך שלך)
-            const stopPhrases = [
+            // 1. פסילה מיידית אם מופיעים משפטי "אין תוצאות" או "מלאה"
+            const blacklist = [
+                "לצערנו לא נמצאו תוצאות",
                 "טיסה מלאה",
                 "הטיסה מלאה",
-                "מלאה",
-                "לצערנו לא נמצאו תוצאות",
-                "לא נמצאו טיסות",
-                "Sold out",
-                "אזל"
+                "מצטערים, אין מקומות",
+                "אזל",
+                "Sold out"
             ];
+            
+            if (blacklist.some(phrase => bodyText.includes(phrase))) {
+                return false;
+            }
 
-            // אם אחת ממילות הפסילה מופיעה - הטיסה לא פנויה (גם אם יש מחיר ליד)
-            const hasError = stopPhrases.some(phrase => bodyText.includes(phrase));
-            if (hasError) return false;
+            // 2. חיפוש אקטיבי של כפתורי רכישה (בישראייר זה בדרך כלל אלמנט לחיץ עם מחיר שלא מכוסה)
+            // אנחנו מחפשים אם יש סימן של מטבע ($ או ₪) שאינו צמוד למילה "מלאה"
+            const hasPrice = bodyText.includes('₪') || bodyText.includes('$');
+            const hasSelection = bodyText.includes('בחירה') || bodyText.includes('בחר טיסה');
 
-            // סימני הצלחה - מחיר או כפתור בחירה
-            const hasPrice = bodyText.includes('₪') || bodyText.includes('$') || bodyText.includes('ILS') || bodyText.includes('בחירה');
-
-            return hasPrice;
+            return hasPrice && hasSelection;
         });
 
         await browser.close();
-        return result;
+        return isAvailable;
     } catch (e) {
         if (browser) await browser.close();
         return false;
@@ -67,7 +71,7 @@ async function checkAvailability(url) {
 }
 
 async function run() {
-    console.log("סורק טיסות ל-4 נוסעים... בדיקה קפדנית נגד טיסות מלאות.");
+    console.log("מריץ סריקה קפדנית ל-4 נוסעים...");
     let results = [];
 
     for (const dest of DESTS) {
@@ -81,7 +85,7 @@ async function run() {
                 results.push(`✈️ *ארקיע* | ${dest.name} | ${fmtSlash} [לינק](${arkiaUrl})`);
             }
 
-            // ישראייר - מבנה מורכב
+            // ישראייר
             const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22IATA%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:null,%22countryCode%22:null,%22countryId%22:null%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code === 'ROM' ? 'ROM' : dest.code}%22,%22ltravelId%22:${dest.israirId},%22countryCode%22:null,%22countryId%22:null%7D&startDate=${fmtSlash}&adults=3&children=1`;
             if (await checkAvailability(israirUrl)) {
                 results.push(`✈️ *ישראייר* | ${dest.name} | ${fmtSlash} [לינק](${israirUrl})`);
@@ -99,9 +103,10 @@ async function run() {
 
     const now = new Date().toLocaleTimeString('he-IL');
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות פנויות ל-4 נוסעים! (${now})*\n\n` + results.join('\n---\n'));
+        await sendTelegram(`📢 *נמצאו טיסות פנויות באמת! (${now})*\n\n` + results.join('\n---\n'));
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו כרטיסים פנויים ל-4 נוסעים.`);
+        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים ל-4 נוסעים.`);
     }
 }
+
 run();
