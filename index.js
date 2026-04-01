@@ -30,17 +30,18 @@ async function checkAvailability(url) {
     try {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+        
+        // המתנה לטעינת התוצאות
         await new Promise(r => setTimeout(r, 12000)); 
 
         const result = await page.evaluate(() => {
             const bodyText = document.body.innerText;
             const errorPhrases = [
-                "הפעם לא מצאנו", "נסו לשנות את היעד", "לצערנו לא נמצאו תוצאות", 
-                "אזל", "טיסה מלאה", "לא נמצאו טיסות", "מצטערים, אין מקומות בתאריכים שחיפשת",
-                "אפשר לבחור תאריכים אחרים", "No flights found", "Sold out"
+                "מצטערים, אין מקומות", "אזל", "טיסה מלאה", "לא נמצאו טיסות",
+                "No flights found", "Sold out", "נסו לשנות את היעד", "הפעם לא מצאנו"
             ];
             const hasError = errorPhrases.some(phrase => bodyText.includes(phrase));
-            const hasPrice = bodyText.includes('₪') || bodyText.includes('$') || bodyText.includes('USD') || bodyText.includes('ILS');
+            const hasPrice = bodyText.includes('₪') || bodyText.includes('$') || bodyText.includes('ILS');
             return hasPrice && !hasError;
         });
 
@@ -71,9 +72,9 @@ async function run() {
                 results.push(`✈️ *ישראייר* | ${dest.name} | ${fmtSlash} [לינק](${israirUrl})`);
             }
 
-            // Air Haifa
+            // Air Haifa - עודכן עם הלינק המדויק ששלחת
             if (dest.airHaifaCode) {
-                const airHaifaUrl = `https://airhaifa.com/flight-results/tlv-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0`;
+                const airHaifaUrl = `https://www.airhaifa.com/flight-results/TLV-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0?breakdown=%7B%7D`;
                 if (await checkAvailability(airHaifaUrl)) {
                     results.push(`✈️ *Air Haifa* | ${dest.name} | ${fmtSlash} [לינק](${airHaifaUrl})`);
                 }
@@ -83,9 +84,9 @@ async function run() {
 
     const now = new Date().toLocaleTimeString('he-IL');
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
+        await sendTelegram(`📢 *נמצאו טיסות פנויות ל-4 נוסעים! (${now})*\n\n` + results.join('\n---\n'));
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו טיסות פנויות ל-4 נוסעים.`);
+        await sendTelegram(`✅ *סריקה הושלמה (${now}):* אין כרגע טיסות פנויות ל-4 נוסעים.`);
     }
 }
 run();
