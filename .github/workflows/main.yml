@@ -1,7 +1,7 @@
 name: Flight Check Agent
 on:
   schedule:
-    - cron: '0 * * * *'  # ירוץ בכל שעה עגולה (לפי זמן UTC)
+    - cron: '17 * * * *'  # ירוץ בכל שעה עגולה (לפי זמן UTC)
   workflow_dispatch:      # מאפשר כפתור הרצה ידנית ב-Actions
   push:                   # מריץ את הבוט אוטומטית ברגע שאתה עושה Commit לקוד
     branches:
