@@ -13,7 +13,7 @@ const DESTS = [
 ];
 
 // סריקה ממוקדת לימים הקרובים
-const DATES = ['20260403', '20260404'];
+const DATES = ['20260403', '20260404', '20260405'];
 
 async function sendTelegram(msg) {
     if (!TELEGRAM_TOKEN || !CHAT_ID) {
