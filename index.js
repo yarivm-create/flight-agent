@@ -30,32 +30,37 @@ async function checkAvailability(url, siteName) {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-        await new Promise(r => setTimeout(r, 40000));
+        
+        // המתנה משמעותית כדי שהסקריפט של ישראייר יסיים לצבוע את הטיסות כ"מלאות"
+        await new Promise(r => setTimeout(r, 45000));
 
         const isAvailable = await page.evaluate((sName) => {
-            // לוגיקה ייעודית לארקיע
-            if (sName === 'ארקיע') {
-                // מחפשים את כל כרטיסי הטיסה בארקיע
-                const cards = Array.from(document.querySelectorAll('div[class*="flight-card"], .flight-result-item, div.flight-row'));
-                if (cards.length === 0) return document.body.innerText.includes('$') && !document.body.innerText.includes('אזל');
-
-                return cards.some(card => {
-                    const text = card.innerText;
+            if (sName === 'ישראייר') {
+                // אנחנו מחפשים את התיבה שבה מופיע המחיר ($)
+                const priceBoxes = Array.from(document.querySelectorAll('div[class*="price"], .price-column, .flight-price-area'));
+                
+                return priceBoxes.some(box => {
+                    const text = box.innerText;
                     const hasPrice = text.includes('$') || text.includes('₪');
-                    const isSoldOut = text.includes('אזל') || text.includes('Sold');
-                    // טיסה פנויה אם יש מחיר ואין עליה חותמת "אזל"
-                    return hasPrice && !isSoldOut;
+                    // בדיקה האם בתוך תיבת המחיר או צמוד אליה מופיעה הודעת חסימה
+                    // בישראייר זה בדרך כלל באנר שכתוב עליו "טיסה מלאה"
+                    const isFull = text.includes('מלאה') || text.includes('קטן מהמבוקש');
+                    
+                    // טיסה פנויה רק אם יש מחיר ואין שום אינדיקציה שהיא מלאה בתוך התיבה
+                    return hasPrice && !isFull;
                 });
             }
 
-            // לוגיקה לישראייר ואייר חיפה
-            const body = document.body.innerText;
-            const hasPrice = body.includes('$') || body.includes('₪');
-            const blockWords = ['טיסה מלאה', 'הטיסה מלאה', 'אזל', 'Sold out', 'קטן מהמבוקש'];
-            const isBlocked = blockWords.some(word => body.includes(word));
-            
-            // בישראייר, אם מופיע מחיר ואין הודעת חסימה גורפת, זה כנראה פנוי
-            return hasPrice && !isBlocked;
+            if (sName === 'ארקיע') {
+                const cards = Array.from(document.querySelectorAll('div[class*="flight-card"], .flight-result-item'));
+                return cards.some(card => {
+                    const text = card.innerText;
+                    // בארקיע מחפשים מחיר ללא הודעת "אזל"
+                    return (text.includes('$') || text.includes('₪')) && !text.includes('אזל');
+                });
+            }
+
+            return document.body.innerText.includes('$') && !document.body.innerText.includes('מלאה');
         }, siteName);
 
         await browser.close();
@@ -67,7 +72,7 @@ async function checkAvailability(url, siteName) {
 }
 
 async function run() {
-    console.log("מריץ סריקה עם זיהוי כרטיסים נפרדים לארקיע...");
+    console.log("סריקה גרסה 8.0: מתעלם מכפתור 'פרטי טיסה' ובודק רק זמינות מחיר...");
     let results = [];
 
     for (const dest of DESTS) {
@@ -92,7 +97,7 @@ async function run() {
     if (results.length > 0) {
         await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים.`);
+        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים (הכל מסומן כ'מלאה').`);
     }
 }
 
