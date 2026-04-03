@@ -47,21 +47,18 @@ async function checkAvailability(url, siteName) {
             if (globalBlock.some(word => bodyText.includes(word))) return false;
 
             if (sName === 'ישראייר') {
-                // מציאת כל השורות/כרטיסים של הטיסות
                 const flightRows = Array.from(document.querySelectorAll('.flight-result-item, [class*="flight-card"], .flight-row, .flight-item'));
                 if (flightRows.length === 0) return false;
 
                 return flightRows.some(row => {
                     const text = row.innerText;
                     const hasPrice = text.includes('$') || text.includes('₪');
-                    // סינון חכם: אם כתוב "מלאה" או "קטן מהמבוקש" בתוך השורה הספציפית
                     const isFull = text.includes('מלאה') || text.includes('קטן מהמבוקש') || text.includes('Sold');
                     return hasPrice && !isFull;
                 });
             }
 
             if (sName === 'ארקיע') {
-                // בארקיע מחפשים כרטיסי טיסה שאין עליהם את המילה "אזל"
                 const arkiaCards = Array.from(document.querySelectorAll('div[class*="flight-card"], .flight-result-item'));
                 if (arkiaCards.length === 0) return bodyText.includes('$') && !bodyText.includes('אזל');
 
@@ -73,7 +70,6 @@ async function checkAvailability(url, siteName) {
                 });
             }
 
-            // ברירת מחדל לאייר חיפה או אתרים אחרים
             return (bodyText.includes('$') || bodyText.includes('₪')) && !bodyText.includes('מלאה');
         }, siteName);
 
@@ -86,9 +82,39 @@ async function checkAvailability(url, siteName) {
 }
 
 async function run() {
-    console.log("מתחיל סריקה גרסה 9.0 (הפרדת לוגיקה מלאה)...");
+    console.log("מריץ סריקה גרסה 9.1...");
     let results = [];
 
     for (const dest of DESTS) {
         for (const date of DATES) {
-            const fmtDash
+            // התיקון כאן - הוספת סימן השווה שנשמט
+            const fmtDash = `${date.substring(0,4)}-${date.substring(4,6)}-${date.substring(6,8)}`;
+            const fmtSlash = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
+
+            const checkList = [
+                { name: 'ארקיע', url: `https://www.arkia.co.il/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1` },
+                { name: 'ישראייר', url: `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22IATA%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:null,%22countryCode%22:null,%22countryId%22:null%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code === 'ROM' ? 'ROM' : dest.code}%22,%22ltravelId%22:${dest.israirId},%22countryCode%22:null,%22countryId%22:null%7D&startDate=${fmtSlash}&adults=3&children=1` }
+            ];
+
+            if (dest.airHaifaCode) {
+                checkList.push({ name: 'Air Haifa', url: `https://www.airhaifa.com/flight-results/TLV-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0?breakdown=%7B%7D` });
+            }
+
+            for (const item of checkList) {
+                const isFound = await checkAvailability(item.url, item.name);
+                if (isFound) {
+                    results.push(`✈️ *${item.name}* | ${dest.name} | ${fmtSlash} [לינק](${item.url})`);
+                }
+            }
+        }
+    }
+
+    const now = new Date().toLocaleTimeString('he-IL');
+    if (results.length > 0) {
+        await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
+    } else {
+        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים.`);
+    }
+}
+
+run();
