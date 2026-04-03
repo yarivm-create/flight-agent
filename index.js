@@ -1,7 +1,6 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 
-// משיכת פרטי הבוט מה-Secrets של GitHub בצורה מאובטחת
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
@@ -12,14 +11,10 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
-// סריקה ממוקדת לימים הקרובים כדי להבטיח ריצה יציבה בכל שעה
 const DATES = ['20260402', '20260403', '20260404'];
 
 async function sendTelegram(msg) {
-    if (!TELEGRAM_TOKEN || !CHAT_ID) {
-        console.error("Missing Telegram Token or Chat ID in Secrets!");
-        return;
-    }
+    if (!TELEGRAM_TOKEN || !CHAT_ID) return;
     try {
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
             chat_id: CHAT_ID, text: msg, parse_mode: 'Markdown', disable_web_page_preview: true
@@ -35,39 +30,20 @@ async function checkAvailability(url) {
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         const page = await browser.newPage();
-        
-        // מגדיר סוכן משתמש כדי שהאתר לא יחשוב שמדובר ברובוט פשוט
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה ארוכה (35 שניות) כדי ש-Air Haifa וישראייר יסיימו לטעון כפתורי "בחירה"
+        // המתנה ארוכה של 35 שניות כדי לוודא שכל המקומות נטענו
         await new Promise(r => setTimeout(r, 35000));
 
         const isAvailable = await page.evaluate(() => {
             const bodyText = document.body.innerText;
-            
-            // רשימת פסילה (אם אלו מופיעים - הטיסה לא פנויה באמת)
-            const blacklist = [
-                "לצערנו לא נמצאו תוצאות",
-                "טיסה מלאה",
-                "הטיסה מלאה",
-                "מצטערים, אין מקומות",
-                "אזל",
-                "Sold out",
-                "Full"
-            ];
-            
-            if (blacklist.some(phrase => bodyText.includes(phrase))) {
-                return false;
-            }
+            const blacklist = ["לצערנו", "טיסה מלאה", "הטיסה מלאה", "אזל", "Sold out", "Full"];
+            if (blacklist.some(p => bodyText.includes(p))) return false;
 
-            // תנאי להצלחה: חייב להיות סימן מטבע וגם כפתור בחירה (עברית/אנגלית)
-            const hasPrice = bodyText.includes('₪') || bodyText.includes('$') || bodyText.includes('USD');
-            const hasSelection = bodyText.includes('בחירה') || bodyText.includes('בחר') || 
-                                 bodyText.includes('Select') || bodyText.includes('Book');
-
-            return hasPrice && hasSelection;
+            const hasPrice = bodyText.includes('₪') || bodyText.includes('$');
+            const hasAction = bodyText.includes('בחירה') || bodyText.includes('בחר') || bodyText.includes('Select');
+            return hasPrice && hasAction;
         });
 
         await browser.close();
@@ -79,7 +55,7 @@ async function checkAvailability(url) {
 }
 
 async function run() {
-    console.log("מריץ סריקה סופר-ממוקדת עם המתנה מוגברת...");
+    console.log("סורק טיסות ל-4 נוסעים בלבד...");
     let results = [];
 
     for (const dest of DESTS) {
@@ -88,11 +64,13 @@ async function run() {
             const fmtSlash = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
 
             const checkList = [
+                // חיפוש 3 מבוגרים וילד אחד (סה"כ 4)
                 { name: 'ארקיע', url: `https://www.arkia.com/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1` },
                 { name: 'ישראייר', url: `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22IATA%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:null,%22countryCode%22:null,%22countryId%22:null%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code === 'ROM' ? 'ROM' : dest.code}%22,%22ltravelId%22:${dest.israirId},%22countryCode%22:null,%22countryId%22:null%7D&startDate=${fmtSlash}&adults=3&children=1` }
             ];
 
             if (dest.airHaifaCode) {
+                // פורמט 3/1/0 (3 מבוגרים, ילד, 0 תינוקות)
                 checkList.push({ name: 'Air Haifa', url: `https://www.airhaifa.com/flight-results/TLV-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0?breakdown=%7B%7D` });
             }
 
@@ -106,10 +84,10 @@ async function run() {
 
     const now = new Date().toLocaleTimeString('he-IL');
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
+        await sendTelegram(`📢 *נמצאו טיסות ל-4 נוסעים! (${now})*\n\n` + results.join('\n---\n'));
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים ל-4 נוסעים.`);
+        // הודעה לטלגרם שהסריקה עבדה אבל אין מקום ל-4
+        await sendTelegram(`✅ *סריקה ל-4 נוסעים הושלמה:* אין כרגע טיסה עם 4 מקומים פנויים.`);
     }
 }
-
 run();
