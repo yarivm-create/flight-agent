@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 
+// פרטי התחברות מה-Secrets של GitHub
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
@@ -11,6 +12,7 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
+// טווח תאריכים מבוקש
 const DATES = ['20260403', '20260404', '20260405', '20260406', '20260407', '20260408'];
 
 async function sendTelegram(msg) {
@@ -33,18 +35,25 @@ async function checkAvailability(url, siteName) {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+        
+        // המתנה לטעינה מלאה של סטטוס הטיסות (מלאה/אזל)
         await new Promise(r => setTimeout(r, 45000));
 
         const isAvailable = await page.evaluate((sName) => {
             const bodyText = document.body.innerText;
 
+            // בדיקת חסימות גורפות בדף
+            const globalBlock = ['לצערנו לא נמצאו', 'אין טיסות בתאריך', 'no flights found'];
+            if (globalBlock.some(word => bodyText.includes(word))) return false;
+
             if (sName === 'ישראייר') {
                 const flightRows = Array.from(document.querySelectorAll('.flight-result-item, [class*="flight-card"], .flight-row'));
                 return flightRows.some(row => {
                     const text = row.innerText;
-                    return (text.includes('$') || text.includes('₪')) && 
-                           !text.includes('מלאה') && 
-                           !text.includes('קטן מהמבוקש');
+                    const hasPrice = text.includes('$') || text.includes('₪');
+                    // סינון טיסות מלאות או עם מחסור במושבים
+                    const isFull = text.includes('מלאה') || text.includes('קטן מהמבוקש') || text.includes('Sold');
+                    return hasPrice && !isFull;
                 });
             }
 
@@ -52,17 +61,27 @@ async function checkAvailability(url, siteName) {
                 const arkiaCards = Array.from(document.querySelectorAll('div[class*="flight-card"], .flight-result-item'));
                 return arkiaCards.some(card => {
                     const text = card.innerText;
+                    // סינון טיסות שמופיע עליהן "אזל"
                     return (text.includes('$') || text.includes('₪')) && !text.includes('אזל');
                 });
             }
 
             if (sName === 'Air Haifa') {
-                // מניעת זיהוי שגוי של הודעת "אין מקומות"
+                // 1. בדיקת הודעת שגיאה על חוסר מקומות
                 if (bodyText.includes('אין מקומות בתאריכים') || bodyText.includes('מצטערים')) return false;
                 
-                // בדיקה שיש מחיר בתוך כרטיס טיסה (ולא סתם בתפריט המטבע למעלה)
-                const priceTags = Array.from(document.querySelectorAll('.price, [class*="price"], .amount'));
-                return priceTags.some(tag => tag.innerText.includes('$') || tag.innerText.includes('₪'));
+                // 2. בדיקת כפתורים - מוודאים שיש מחיר ואין את המילה "מלאה" עליו
+                const buttons = Array.from(document.querySelectorAll('button, .btn, [class*="button"]'));
+                const hasValidButton = buttons.some(btn => {
+                    const t = btn.innerText;
+                    return (t.includes('$') || t.includes('₪')) && !t.includes('מלאה');
+                });
+                
+                if (hasValidButton) return true;
+
+                // 3. גיבוי - חיפוש מחיר בתוך כרטיס טיסה נקי
+                const cards = Array.from(document.querySelectorAll('.flight-card, [class*="FlightCard"]'));
+                return cards.some(c => (c.innerText.includes('$') || c.innerText.includes('₪')) && !c.innerText.includes('מלאה'));
             }
 
             return false;
@@ -77,7 +96,7 @@ async function checkAvailability(url, siteName) {
 }
 
 async function run() {
-    console.log("סריקה גרסה 9.2: תיקון זיהוי שווא ב-Air Haifa...");
+    console.log("מריץ סריקה גרסה 9.3 (חסינת זיופים)...");
     let results = [];
 
     for (const dest of DESTS) {
