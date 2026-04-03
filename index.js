@@ -12,7 +12,7 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
-const DATES = ['20260403', '20260404', '20260405'];
+const DATES = ['20260403', '20260404', '20260405', '20260406', '20260407', '20260408'];
 
 async function sendTelegram(msg) {
     if (!TELEGRAM_TOKEN || !CHAT_ID) return;
