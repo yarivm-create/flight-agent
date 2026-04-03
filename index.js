@@ -11,7 +11,6 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
-// תאריכים עד ה-08.04
 const DATES = ['20260403', '20260404', '20260405', '20260406', '20260407', '20260408'];
 
 async function sendTelegram(msg) {
@@ -23,47 +22,35 @@ async function sendTelegram(msg) {
     } catch (e) { console.error("Telegram error:", e.message); }
 }
 
-async function checkAvailability(url) {
+async function checkAvailability(url, siteName) {
     let browser;
     try {
-        browser = await puppeteer.launch({
-            headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+        browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox', '--disable-setuid-sandbox'] });
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-        // המתנה משמעותית לטעינת המחירים והאלמנטים הוויזואליים
-        await new Promise(r => setTimeout(r, 40000));
+        await new Promise(r => setTimeout(r, 45000)); // המתנה ארוכה לטעינה מלאה של החותמות
 
-        const isAvailable = await page.evaluate(() => {
-            // זיהוי כל הטיסות בדף לפי קלאסים נפוצים או מבנה של "כרטיס"
-            const flightCards = Array.from(document.querySelectorAll('div[class*="flight"], div[class*="card"], .flight-row'));
+        const result = await page.evaluate(() => {
+            const body = document.body.innerText;
+            const hasPrice = body.includes('$') || body.includes('₪');
             
-            // אם לא מצאנו אלמנטים ספציפיים, נחזור לבדיקת טקסט גמישה יותר
-            if (flightCards.length === 0) {
-                const body = document.body.innerText;
-                const hasPrice = body.includes('$') || body.includes('₪');
-                const isFull = body.includes('טיסה מלאה') || body.includes('הטיסה מלאה');
-                const lowSeats = body.includes('מספר המושבים הפנויים בטיסה קטן');
-                return hasPrice && !isFull && !lowSeats;
-            }
+            // בדיקה של ביטויי "חסימה" - אם אחד מאלה קיים, הטיסה לא באמת פנויה
+            const isFull = body.includes('טיסה מלאה') || body.includes('הטיסה מלאה');
+            const noSeats = body.includes('קטן מהמבוקש') || body.includes('אין מקומות');
+            const soldOut = body.includes('Sold out') || body.includes('אזל');
 
-            // בדיקה של כל כרטיס טיסה בנפרד
-            return flightCards.some(card => {
-                const text = card.innerText;
-                const hasPrice = text.includes('$') || text.includes('₪');
-                const isFull = text.includes('טיסה מלאה') || text.includes('הטיסה מלאה') || text.includes('אזל');
-                const lowSeats = text.includes('קטן מהמבוקש') || text.includes('מושבים פנויים');
-                
-                // הטיסה פנויה אם יש מחיר ואין הודעות חוסר זמינות בתוך הכרטיס הספציפי
-                return hasPrice && !isFull && !lowSeats;
-            });
+            // לוגיקה מחמירה: חייב להיות מחיר, ואסור שיהיה אף אחד מביטויי החסימה
+            return {
+                available: hasPrice && !isFull && !noSeats && !soldOut,
+                debug: `Price: ${hasPrice}, Full: ${isFull}, NoSeats: ${noSeats}`
+            };
         });
 
+        console.log(`[${siteName}] Check: ${result.debug}`);
         await browser.close();
-        return isAvailable;
+        return result.available;
     } catch (e) {
         if (browser) await browser.close();
         return false;
@@ -71,7 +58,7 @@ async function checkAvailability(url) {
 }
 
 async function run() {
-    console.log("מריץ סריקה משופרת ל-4 נוסעים (3+1) עד ה-08/04...");
+    console.log("מתחיל סריקה מחמירה (סינון חותמות 'מלאה')...");
     let results = [];
 
     for (const dest of DESTS) {
@@ -89,7 +76,8 @@ async function run() {
             }
 
             for (const item of checkList) {
-                if (await checkAvailability(item.url)) {
+                const isOk = await checkAvailability(item.url, item.name);
+                if (isOk) {
                     results.push(`✈️ *${item.name}* | ${dest.name} | ${fmtSlash} [לינק](${item.url})`);
                 }
             }
@@ -100,7 +88,7 @@ async function run() {
     if (results.length > 0) {
         await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים.`);
+        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים (הכל מלא/אזל).`);
     }
 }
 
