@@ -12,8 +12,19 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
-// טווח תאריכים מבוקש
-const DATES = ['20260403', '20260404', '20260405', '20260406', '20260407', '20260408'];
+// פונקציה ליצירת רשימת תאריכים דינמית (מהיום ועד 5 ימים קדימה)
+function getDynamicDates() {
+    const dates = [];
+    for (let i = 0; i <= 5; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() + i);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        dates.push(`${year}${month}${day}`);
+    }
+    return dates;
+}
 
 async function sendTelegram(msg) {
     if (!TELEGRAM_TOKEN || !CHAT_ID) return;
@@ -36,15 +47,13 @@ async function checkAvailability(url, siteName) {
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה לטעינת כפתורים או אלמנטים של מחיר
-        await page.waitForSelector('button, .price, [class*="price"]', { timeout: 30000 }).catch(() => {});
-        // המתנה נוספת לביטחון שהסטטוס (מלאה/אזל) התעדכן
-        await new Promise(r => setTimeout(r, 40000));
+        // המתנה לטעינת אלמנטים קריטיים
+        await page.waitForSelector('button, .price, [class*="price"]', { timeout: 20000 }).catch(() => {});
+        await new Promise(r => setTimeout(r, 35000));
 
         const isAvailable = await page.evaluate((sName) => {
             const bodyText = document.body.innerText;
 
-            // בדיקת חסימות גורפות (למשל הודעת "אין תוצאות")
             const globalBlock = ['לצערנו לא נמצאו', 'אין טיסות בתאריך', 'no flights found'];
             if (globalBlock.some(word => bodyText.includes(word))) return false;
 
@@ -67,10 +76,7 @@ async function checkAvailability(url, siteName) {
             }
 
             if (sName === 'Air Haifa') {
-                // 1. חסימה אם מופיעה הודעת "אין מקומות" מפורשת
                 if (bodyText.includes('אין מקומות בתאריכים') || bodyText.includes('מצטערים')) return false;
-                
-                // 2. סריקת כל הכפתורים - מחפשים כפתור עם מחיר שלא כתוב עליו "מלאה"
                 const allButtons = Array.from(document.querySelectorAll('button, [role="button"], .btn, [class*="button"]'));
                 return allButtons.some(btn => {
                     const t = btn.innerText;
@@ -92,11 +98,12 @@ async function checkAvailability(url, siteName) {
 }
 
 async function run() {
-    console.log("מריץ סריקה גרסה 9.4 (תיקון כפתורי Air Haifa)...");
+    const dynamicDates = getDynamicDates();
+    console.log(`מריץ סריקה דינמית לתאריכים: ${dynamicDates.join(', ')}`);
     let results = [];
 
     for (const dest of DESTS) {
-        for (const date of DATES) {
+        for (const date of dynamicDates) {
             const fmtDash = `${date.substring(0,4)}-${date.substring(4,6)}-${date.substring(6,8)}`;
             const fmtSlash = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
 
@@ -110,8 +117,7 @@ async function run() {
             }
 
             for (const item of checkList) {
-                const found = await checkAvailability(item.url, item.name);
-                if (found) {
+                if (await checkAvailability(item.url, item.name)) {
                     results.push(`✈️ *${item.name}* | ${dest.name} | ${fmtSlash} [לינק](${item.url})`);
                 }
             }
@@ -122,7 +128,7 @@ async function run() {
     if (results.length > 0) {
         await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים.`);
+        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים בטווח 5 הימים הקרובים.`);
     }
 }
 
