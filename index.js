@@ -36,13 +36,15 @@ async function checkAvailability(url, siteName) {
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה לטעינה מלאה של סטטוס הטיסות (מלאה/אזל)
-        await new Promise(r => setTimeout(r, 45000));
+        // המתנה לטעינת כפתורים או אלמנטים של מחיר
+        await page.waitForSelector('button, .price, [class*="price"]', { timeout: 30000 }).catch(() => {});
+        // המתנה נוספת לביטחון שהסטטוס (מלאה/אזל) התעדכן
+        await new Promise(r => setTimeout(r, 40000));
 
         const isAvailable = await page.evaluate((sName) => {
             const bodyText = document.body.innerText;
 
-            // בדיקת חסימות גורפות בדף
+            // בדיקת חסימות גורפות (למשל הודעת "אין תוצאות")
             const globalBlock = ['לצערנו לא נמצאו', 'אין טיסות בתאריך', 'no flights found'];
             if (globalBlock.some(word => bodyText.includes(word))) return false;
 
@@ -50,10 +52,9 @@ async function checkAvailability(url, siteName) {
                 const flightRows = Array.from(document.querySelectorAll('.flight-result-item, [class*="flight-card"], .flight-row'));
                 return flightRows.some(row => {
                     const text = row.innerText;
-                    const hasPrice = text.includes('$') || text.includes('₪');
-                    // סינון טיסות מלאות או עם מחסור במושבים
-                    const isFull = text.includes('מלאה') || text.includes('קטן מהמבוקש') || text.includes('Sold');
-                    return hasPrice && !isFull;
+                    return (text.includes('$') || text.includes('₪')) && 
+                           !text.includes('מלאה') && 
+                           !text.includes('קטן מהמבוקש');
                 });
             }
 
@@ -61,27 +62,22 @@ async function checkAvailability(url, siteName) {
                 const arkiaCards = Array.from(document.querySelectorAll('div[class*="flight-card"], .flight-result-item'));
                 return arkiaCards.some(card => {
                     const text = card.innerText;
-                    // סינון טיסות שמופיע עליהן "אזל"
                     return (text.includes('$') || text.includes('₪')) && !text.includes('אזל');
                 });
             }
 
             if (sName === 'Air Haifa') {
-                // 1. בדיקת הודעת שגיאה על חוסר מקומות
+                // 1. חסימה אם מופיעה הודעת "אין מקומות" מפורשת
                 if (bodyText.includes('אין מקומות בתאריכים') || bodyText.includes('מצטערים')) return false;
                 
-                // 2. בדיקת כפתורים - מוודאים שיש מחיר ואין את המילה "מלאה" עליו
-                const buttons = Array.from(document.querySelectorAll('button, .btn, [class*="button"]'));
-                const hasValidButton = buttons.some(btn => {
+                // 2. סריקת כל הכפתורים - מחפשים כפתור עם מחיר שלא כתוב עליו "מלאה"
+                const allButtons = Array.from(document.querySelectorAll('button, [role="button"], .btn, [class*="button"]'));
+                return allButtons.some(btn => {
                     const t = btn.innerText;
-                    return (t.includes('$') || t.includes('₪')) && !t.includes('מלאה');
+                    const hasPrice = t.includes('$') || t.includes('₪');
+                    const isFull = t.includes('מלאה') || t.includes('Sold');
+                    return hasPrice && !isFull;
                 });
-                
-                if (hasValidButton) return true;
-
-                // 3. גיבוי - חיפוש מחיר בתוך כרטיס טיסה נקי
-                const cards = Array.from(document.querySelectorAll('.flight-card, [class*="FlightCard"]'));
-                return cards.some(c => (c.innerText.includes('$') || c.innerText.includes('₪')) && !c.innerText.includes('מלאה'));
             }
 
             return false;
@@ -96,7 +92,7 @@ async function checkAvailability(url, siteName) {
 }
 
 async function run() {
-    console.log("מריץ סריקה גרסה 9.3 (חסינת זיופים)...");
+    console.log("מריץ סריקה גרסה 9.4 (תיקון כפתורי Air Haifa)...");
     let results = [];
 
     for (const dest of DESTS) {
@@ -114,7 +110,8 @@ async function run() {
             }
 
             for (const item of checkList) {
-                if (await checkAvailability(item.url, item.name)) {
+                const found = await checkAvailability(item.url, item.name);
+                if (found) {
                     results.push(`✈️ *${item.name}* | ${dest.name} | ${fmtSlash} [לינק](${item.url})`);
                 }
             }
