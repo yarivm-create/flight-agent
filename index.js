@@ -1,7 +1,6 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 
-// פרטי התחברות מה-Secrets של GitHub
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
@@ -12,10 +11,10 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
-// פונקציה ליצירת רשימת תאריכים דינמית (מהיום ועד 5 ימים קדימה)
+// מחפש מהיום ועד 7 ימים קדימה כדי לא לפספס את הקצה
 function getDynamicDates() {
     const dates = [];
-    for (let i = 0; i <= 5; i++) {
+    for (let i = 0; i <= 7; i++) {
         const d = new Date();
         d.setDate(d.getDate() + i);
         const year = d.getFullYear();
@@ -43,47 +42,45 @@ async function checkAvailability(url, siteName) {
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
         const page = await browser.newPage();
+        await page.setViewport({ width: 1280, height: 800 });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה לטעינת אלמנטים קריטיים
-        await page.waitForSelector('button, .price, [class*="price"]', { timeout: 20000 }).catch(() => {});
-        await new Promise(r => setTimeout(r, 35000));
+        // המתנה ארוכה יותר לטעינת מחירי "דילים" וכרטיסיות
+        await page.waitForSelector('button, .price, [class*="price"], .flight-result-item', { timeout: 25000 }).catch(() => {});
+        await new Promise(r => setTimeout(r, 45000));
 
         const isAvailable = await page.evaluate((sName) => {
             const bodyText = document.body.innerText;
 
-            const globalBlock = ['לצערנו לא נמצאו', 'אין טיסות בתאריך', 'no flights found'];
-            if (globalBlock.some(word => bodyText.includes(word))) return false;
+            // בדיקת הודעות שגיאה
+            if (bodyText.includes('לצערנו לא נמצאו') || bodyText.includes('אין טיסות בתאריך')) return false;
 
+            // לוגיקה משופרת לישראייר - סורקת כל אלמנט שיכול להכיל מחיר
             if (sName === 'ישראייר') {
-                const flightRows = Array.from(document.querySelectorAll('.flight-result-item, [class*="flight-card"], .flight-row'));
-                return flightRows.some(row => {
-                    const text = row.innerText;
-                    return (text.includes('$') || text.includes('₪')) && 
-                           !text.includes('מלאה') && 
-                           !text.includes('קטן מהמבוקש');
-                });
-            }
-
-            if (sName === 'ארקיע') {
-                const arkiaCards = Array.from(document.querySelectorAll('div[class*="flight-card"], .flight-result-item'));
-                return arkiaCards.some(card => {
-                    const text = card.innerText;
-                    return (text.includes('$') || text.includes('₪')) && !text.includes('אזל');
+                // מחפשים את כל הבלוקים שיכולים להיות כרטיס טיסה או דיל
+                const containers = Array.from(document.querySelectorAll('.flight-result-item, [class*="flight-card"], .item-container, .main-content'));
+                return containers.some(el => {
+                    const t = el.innerText;
+                    const hasPrice = t.includes('$') || t.includes('₪');
+                    const isSoldOut = t.includes('מלאה') || t.includes('קטן מהמבוקש');
+                    return hasPrice && !isSoldOut;
                 });
             }
 
             if (sName === 'Air Haifa') {
-                if (bodyText.includes('אין מקומות בתאריכים') || bodyText.includes('מצטערים')) return false;
-                const allButtons = Array.from(document.querySelectorAll('button, [role="button"], .btn, [class*="button"]'));
-                return allButtons.some(btn => {
+                if (bodyText.includes('אין מקומות') || bodyText.includes('מצטערים')) return false;
+                const buttons = Array.from(document.querySelectorAll('button, [role="button"], .btn'));
+                return buttons.some(btn => {
                     const t = btn.innerText;
-                    const hasPrice = t.includes('$') || t.includes('₪');
-                    const isFull = t.includes('מלאה') || t.includes('Sold');
-                    return hasPrice && !isFull;
+                    return (t.includes('$') || t.includes('₪')) && !t.includes('מלאה');
                 });
+            }
+
+            if (sName === 'ארקיע') {
+                const cards = Array.from(document.querySelectorAll('div[class*="flight-card"]'));
+                return cards.some(c => c.innerText.includes('$') && !c.innerText.includes('אזל'));
             }
 
             return false;
@@ -99,7 +96,6 @@ async function checkAvailability(url, siteName) {
 
 async function run() {
     const dynamicDates = getDynamicDates();
-    console.log(`מריץ סריקה דינמית לתאריכים: ${dynamicDates.join(', ')}`);
     let results = [];
 
     for (const dest of DESTS) {
@@ -126,9 +122,9 @@ async function run() {
 
     const now = new Date().toLocaleTimeString('he-IL');
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
+        await sendTelegram(`📢 *נמצאו טיסות! (${now})*\n\n` + results.join('\n---\n'));
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים בטווח 5 הימים הקרובים.`);
+        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים.`);
     }
 }
 
