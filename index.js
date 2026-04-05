@@ -11,7 +11,6 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
-// מחפש מהיום ועד 7 ימים קדימה כדי לא לפספס את הקצה
 function getDynamicDates() {
     const dates = [];
     for (let i = 0; i <= 7; i++) {
@@ -47,35 +46,27 @@ async function checkAvailability(url, siteName) {
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה ארוכה יותר לטעינת מחירי "דילים" וכרטיסיות
-        await page.waitForSelector('button, .price, [class*="price"], .flight-result-item', { timeout: 25000 }).catch(() => {});
+        // המתנה לטעינת התוצאות מהקישור
+        await page.waitForSelector('button, .price, .flight-result-item', { timeout: 30000 }).catch(() => {});
         await new Promise(r => setTimeout(r, 45000));
 
         const isAvailable = await page.evaluate((sName) => {
             const bodyText = document.body.innerText;
-
-            // בדיקת הודעות שגיאה
             if (bodyText.includes('לצערנו לא נמצאו') || bodyText.includes('אין טיסות בתאריך')) return false;
 
-            // לוגיקה משופרת לישראייר - סורקת כל אלמנט שיכול להכיל מחיר
             if (sName === 'ישראייר') {
-                // מחפשים את כל הבלוקים שיכולים להיות כרטיס טיסה או דיל
-                const containers = Array.from(document.querySelectorAll('.flight-result-item, [class*="flight-card"], .item-container, .main-content'));
-                return containers.some(el => {
+                // בדיקת כרטיסיות מחיר (תואם ללינק ששלחת)
+                const items = Array.from(document.querySelectorAll('.flight-result-item, [class*="flight-card"], .item-container'));
+                return items.some(el => {
                     const t = el.innerText;
-                    const hasPrice = t.includes('$') || t.includes('₪');
-                    const isSoldOut = t.includes('מלאה') || t.includes('קטן מהמבוקש');
-                    return hasPrice && !isSoldOut;
+                    return (t.includes('$') || t.includes('₪')) && !t.includes('מלאה') && !t.includes('קטן מהמבוקש');
                 });
             }
 
             if (sName === 'Air Haifa') {
                 if (bodyText.includes('אין מקומות') || bodyText.includes('מצטערים')) return false;
-                const buttons = Array.from(document.querySelectorAll('button, [role="button"], .btn'));
-                return buttons.some(btn => {
-                    const t = btn.innerText;
-                    return (t.includes('$') || t.includes('₪')) && !t.includes('מלאה');
-                });
+                const btns = Array.from(document.querySelectorAll('button'));
+                return btns.some(b => (b.innerText.includes('$') || b.innerText.includes('₪')) && !b.innerText.includes('מלאה'));
             }
 
             if (sName === 'ארקיע') {
@@ -103,9 +94,12 @@ async function run() {
             const fmtDash = `${date.substring(0,4)}-${date.substring(4,6)}-${date.substring(6,8)}`;
             const fmtSlash = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
 
+            // הקישור המדויק של ישראייר לפי המבנה ששלחת
+            const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:768,%22countryCode%22:null,%22countryId%22:null%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId},%22countryCode%22:null,%22countryId%22:null%7D&startDate=${fmtSlash}&adults=3&children=1`;
+
             const checkList = [
                 { name: 'ארקיע', url: `https://www.arkia.co.il/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1` },
-                { name: 'ישראייר', url: `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22IATA%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:null,%22countryCode%22:null,%22countryId%22:null%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId},%22countryCode%22:null,%22countryId%22:null%7D&startDate=${fmtSlash}&adults=3&children=1` }
+                { name: 'ישראייר', url: israirUrl }
             ];
 
             if (dest.airHaifaCode) {
@@ -122,9 +116,9 @@ async function run() {
 
     const now = new Date().toLocaleTimeString('he-IL');
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות! (${now})*\n\n` + results.join('\n---\n'));
+        await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה (${now}):* לא נמצאו מקומות פנויים.`);
+        await sendTelegram(`✅ *סריקה הושלמה (${now}):* הכל מלא.`);
     }
 }
 
