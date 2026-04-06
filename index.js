@@ -1,7 +1,6 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 
-// הגדרות טלגרם מה-Secrets של GitHub
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
@@ -12,10 +11,9 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
-// פונקציה ליצירת תאריכים: מהיום ועד 7 ימים קדימה
 function getDynamicDates() {
     const dates = [];
-    for (let i = 0; i <= 7; i++) {
+    for (let i = 0; i <= 6; i++) { // צמצום ל-6 ימים לשיפור מהירות
         const d = new Date();
         d.setDate(d.getDate() + i);
         const year = d.getFullYear();
@@ -38,43 +36,25 @@ async function sendTelegram(msg) {
 async function checkAvailability(url, siteName) {
     let browser;
     try {
-        browser = await puppeteer.launch({
-            headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--window-size=1280,800']
-        });
+        browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
         const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
         
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-        
-        // המתנה ארוכה כדי לוודא שכל המחירים וה"כרזות" (Badge) נטענו
-        await new Promise(r => setTimeout(r, 45000));
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 40000 });
+        await new Promise(r => setTimeout(r, 20000)); // 20 שניות זה ה-Sweet Spot
 
-        const isAvailable = await page.evaluate((sName) => {
+        const isAvailable = await page.evaluate(() => {
             const bodyText = document.body.innerText;
             if (bodyText.includes('לצערנו לא נמצאו') || bodyText.includes('אין מקומות')) return false;
 
-            // איתור הבלוקים של הטיסות (containers)
-            const flightBlocks = Array.from(document.querySelectorAll('.flight-result-item, .item-container, [class*="flight-card"]'));
-            
-            if (flightBlocks.length === 0) return false;
-
-            return flightBlocks.some(block => {
-                const text = block.innerText;
-                const hasPrice = text.includes('$') || text.includes('₪');
-                
-                // --- התיקון הקריטי: סינון מחמיר של טיסות מלאות ---
-                // אנחנו בודקים אם התיבה כולה מכילה מילת חסימה
-                const isFull = text.includes('מלאה') || 
-                               text.includes('מלא') || 
-                               text.includes('אזל') || 
-                               text.includes('Sold Out') || 
-                               text.includes('קטן מהמבוקש');
-
+            const elements = Array.from(document.querySelectorAll('.flight-result-item, .item-container, button, [class*="price"]'));
+            return elements.some(el => {
+                const txt = el.innerText;
+                const hasPrice = txt.includes('$') || txt.includes('₪');
+                const isFull = txt.includes('מלאה') || txt.includes('מלא') || txt.includes('Sold') || txt.includes('אזל');
                 return hasPrice && !isFull;
             });
-        }, siteName);
-
+        });
         await browser.close();
         return isAvailable;
     } catch (e) {
@@ -84,6 +64,9 @@ async function checkAvailability(url, siteName) {
 }
 
 async function run() {
+    const now = new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
+    await sendTelegram(`🔍 *סריקה התחילה (${now})*`); // הודעת "אני חי" בתחילת ריצה
+
     const dates = getDynamicDates();
     let results = [];
 
@@ -92,7 +75,8 @@ async function run() {
             const fmtDash = `${date.substring(0,4)}-${date.substring(4,6)}-${date.substring(6,8)}`;
             const fmtSlash = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
 
-            const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:768%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId}%7D&startDate=${fmtSlash}&adults=3&children=1`;
+            // שימוש בקוד נתב"ג 2135 המדויק
+            const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:2135%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId}%7D&startDate=${fmtSlash}&adults=3&children=1`;
 
             const checkList = [
                 { name: 'ארקיע', url: `https://www.arkia.co.il/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1` },
@@ -112,8 +96,9 @@ async function run() {
     }
 
     if (results.length > 0) {
-        const now = new Date().toLocaleTimeString('he-IL');
-        await sendTelegram(`📢 *נמצאו טיסות! (${now})*\n\n` + results.join('\n---\n'));
+        await sendTelegram(`📢 *נמצאו טיסות! *\n\n${results.join('\n---\n')}`);
+    } else {
+        await sendTelegram(`✅ *סריקה הושלמה*\nלא נמצאו טיסות פנויות כרגע.`);
     }
 }
 
