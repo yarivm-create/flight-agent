@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 
+// הגדרות טלגרם - וודא שהזנת את ה-Secrets החדשים ב-GitHub!
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
@@ -13,7 +14,7 @@ const DESTS = [
 
 function getDynamicDates() {
     const dates = [];
-    for (let i = 0; i <= 6; i++) { // צמצום ל-6 ימים לשיפור מהירות
+    for (let i = 0; i <= 6; i++) {
         const d = new Date();
         d.setDate(d.getDate() + i);
         const year = d.getFullYear();
@@ -43,29 +44,24 @@ async function checkAvailability(url, siteName) {
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
         
-        // טעינה מהירה יותר
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 40000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 50000 });
         
-        // המתנה אופטימלית - 20 שניות מספיקות לרוב האתרים לטעון מחירים
-        await new Promise(r => setTimeout(r, 20000));
+        // המתנה של 25 שניות לטעינת מחירים ומניעת חסימות
+        await new Promise(r => setTimeout(r, 25000));
 
-        const isAvailable = await page.evaluate((sName) => {
+        const isAvailable = await page.evaluate(() => {
             const bodyText = document.body.innerText;
             if (bodyText.includes('לצערנו לא נמצאו') || bodyText.includes('אין מקומות')) return false;
 
-            // איתור אלמנטים של טיסות
-            const selectors = '.flight-result-item, .item-container, [class*="flight-card"], [class*="FlightItem"], button';
-            const elements = Array.from(document.querySelectorAll(selectors));
+            const elements = Array.from(document.querySelectorAll('.flight-result-item, .item-container, button, [class*="price"]'));
             
             return elements.some(el => {
                 const txt = el.innerText;
                 const hasPrice = txt.includes('$') || txt.includes('₪');
-                // בדיקת חסימות (הבועות של ישראייר ואייר חיפה)
                 const isBlocked = txt.includes('מלאה') || txt.includes('מלא') || txt.includes('Sold') || txt.includes('אזל');
-                
                 return hasPrice && !isBlocked;
             });
-        }, siteName);
+        });
 
         await browser.close();
         return isAvailable;
@@ -76,20 +72,22 @@ async function checkAvailability(url, siteName) {
 }
 
 async function run() {
+    const now = new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' });
     const dates = getDynamicDates();
     let results = [];
+
+    console.log(`מתחיל סריקה: ${now}`);
 
     for (const dest of DESTS) {
         for (const date of dates) {
             const fmtDash = `${date.substring(0,4)}-${date.substring(4,6)}-${date.substring(6,8)}`;
             const fmtSlash = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
 
-            // הגדרות לינקים מעודכנות
+            // קישור ישראייר מעודכן ל-3 מבוגרים וילד אחד (קוד 2135)
             const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:2135%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId}%7D&startDate=${fmtSlash}&adults=3&children=1`;
-            const arkiaUrl = `https://www.arkia.co.il/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1`;
 
             const checkList = [
-                { name: 'ארקיע', url: arkiaUrl },
+                { name: 'ארקיע', url: `https://www.arkia.co.il/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1` },
                 { name: 'ישראייר', url: israirUrl }
             ];
 
@@ -98,7 +96,6 @@ async function run() {
             }
 
             for (const item of checkList) {
-                console.log(`בודק: ${item.name} | ${dest.name} | ${fmtSlash}`);
                 if (await checkAvailability(item.url, item.name)) {
                     results.push(`✈️ *${item.name}* | ${dest.name} | ${fmtSlash} [לינק](${item.url})`);
                 }
@@ -106,15 +103,14 @@ async function run() {
         }
     }
 
-    const now = new Date().toLocaleTimeString('he-IL');
+    // שליחת סיכום בכל מקרה
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
+        await sendTelegram(`📢 *נמצאו טיסות!* (נסרק ב-${now})\n\n${results.join('\n---\n')}`);
     } else {
-        // שולח הודעת "הכל מלא" פעם אחת ביום כדי שנדע שהסקריפט עובד
-        if (new Date().getHours() === 9) { // למשל ב-9 בבוקר
-             await sendTelegram(`✅ הסורק עובד (${now}), אך הכל מלא כרגע.`);
-        }
+        await sendTelegram(`🔍 *סריקה הושלמה (${now})*\nלא נמצאו טיסות פנויות שעומדות בקריטריונים.`);
     }
+    
+    console.log(`סיום סריקה: ${new Date().toLocaleTimeString()}`);
 }
 
 run();
