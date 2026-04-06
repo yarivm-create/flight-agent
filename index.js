@@ -1,6 +1,7 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 
+// הגדרות טלגרם מה-Secrets של GitHub
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
@@ -11,6 +12,7 @@ const DESTS = [
     { code: 'PFO', name: 'פאפוס 🇨🇾', israirId: 3968, airHaifaCode: null }
 ];
 
+// פונקציה ליצירת תאריכים: מהיום ועד 7 ימים קדימה
 function getDynamicDates() {
     const dates = [];
     for (let i = 0; i <= 7; i++) {
@@ -45,22 +47,38 @@ async function checkAvailability(url, siteName) {
         
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה ארוכה לטעינת כל רכיבי המחיר
+        // המתנה ארוכה כדי לוודא ששכבות ה"טיסה מלאה" נטענו מעל המחירים
         await new Promise(r => setTimeout(r, 45000));
 
         const isAvailable = await page.evaluate((sName) => {
             const bodyText = document.body.innerText;
+            
+            // הגנות גנריות נגד דפי "אין תוצאות"
             if (bodyText.includes('לצערנו לא נמצאו') || bodyText.includes('מצטערים, אין מקומות')) return false;
 
-            // סריקה רחבה של כל אלמנט שמכיל סימן של מחיר
-            const elements = Array.from(document.querySelectorAll('button, .price, [class*="price"], .flight-result-item, .item-container'));
+            // איתור כל הבלוקים שיכולים להכיל טיסה (Containers)
+            const blocks = Array.from(document.querySelectorAll('.flight-result-item, .item-container, [class*="flight-card"], [class*="FlightItem"]'));
             
-            return elements.some(el => {
-                const t = el.innerText;
-                const hasPrice = t.includes('$') || t.includes('₪');
-                // פסילת טיסות מלאות (לפי התמונות ששלחת)
-                const isFull = t.includes('מלאה') || t.includes('Sold Out') || t.includes('אזל') || t.includes('קטן מהמבוקש');
+            if (blocks.length === 0) {
+                // גיבוי למקרה שהעיצוב השתנה - מחפשים מחיר ומוודאים שאין מילת חסימה בקרבת מקום
+                const allWithPrice = Array.from(document.querySelectorAll('*')).filter(el => el.innerText.includes('$'));
+                return allWithPrice.some(el => {
+                    const txt = el.closest('div')?.innerText || el.innerText;
+                    return !txt.includes('מלאה') && !txt.includes('אזל') && !txt.includes('Sold');
+                });
+            }
+
+            return blocks.some(block => {
+                const text = block.innerText;
+                const hasPrice = text.includes('$') || text.includes('₪');
                 
+                // סינון קפדני של טיסות מלאות (פותר את הזיופים בישראייר)
+                const isFull = text.includes('מלאה') || 
+                               text.includes('מלא') || 
+                               text.includes('אזל') || 
+                               text.includes('Sold Out') || 
+                               text.includes('קטן מהמבוקש');
+
                 return hasPrice && !isFull;
             });
         }, siteName);
@@ -74,15 +92,16 @@ async function checkAvailability(url, siteName) {
 }
 
 async function run() {
-    const dynamicDates = getDynamicDates();
+    const dates = getDynamicDates();
+    console.log(`מריץ סריקה לטווח: ${dates[0]} עד ${dates[dates.length-1]}`);
     let results = [];
 
     for (const dest of DESTS) {
-        for (const date of dynamicDates) {
+        for (const date of dates) {
             const fmtDash = `${date.substring(0,4)}-${date.substring(4,6)}-${date.substring(6,8)}`;
             const fmtSlash = `${date.substring(6,8)}/${date.substring(4,6)}/${date.substring(0,4)}`;
 
-            // שימוש ב-ltravelId 2135 עבור תל אביב ובהרכב של 3 מבוגרים וילד/שניים
+            // בניית הקישור לישראייר עם קוד נתב"ג 2135 והרכב 3+1
             const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:2135%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId}%7D&startDate=${fmtSlash}&adults=3&children=1`;
 
             const checkList = [
@@ -95,6 +114,7 @@ async function run() {
             }
 
             for (const item of checkList) {
+                console.log(`בודק: ${item.name} | ${dest.name} | ${fmtSlash}`);
                 if (await checkAvailability(item.url, item.name)) {
                     results.push(`✈️ *${item.name}* | ${dest.name} | ${fmtSlash} [לינק](${item.url})`);
                 }
@@ -104,7 +124,9 @@ async function run() {
 
     const now = new Date().toLocaleTimeString('he-IL');
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות! (${now})*\n\n` + results.join('\n---\n'));
+        await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n` + results.join('\n---\n'));
+    } else {
+        console.log("לא נמצאו טיסות פנויות בסבב זה.");
     }
 }
 
