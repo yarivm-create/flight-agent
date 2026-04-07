@@ -38,38 +38,47 @@ async function checkAvailability(url, siteName) {
     try {
         browser = await puppeteer.launch({ 
             headless: "new", 
-            args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled' // הסוואת הבוט
+            ] 
         });
         const page = await browser.newPage();
         
-        // התחזות מלאה לאייפון כדי לעקוף חסימות של אייר חיפה
-        await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1');
-        await page.setViewport({ width: 390, height: 844 });
+        // התחזות לדפדפן אמיתי לחלוטין
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
+        await page.setViewport({ width: 1280, height: 800 });
 
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 60000 });
+        // מניעת טעינת תמונות וסטייל מיותר כדי לחסוך זמן ומשאבים
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'font'].includes(req.resourceType())) req.abort();
+            else req.continue();
+        });
+
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         
-        // המתנה לטעינת הכפתורים הכחולים של אייר חיפה
-        await new Promise(r => setTimeout(r, 25000));
+        // המתנה משמעותית לטעינת ה-JavaScript של המחירים
+        await new Promise(r => setTimeout(r, 20000));
 
         const isAvailable = await page.evaluate((sName) => {
             const body = document.body.innerText;
-            if (body.includes('לא נמצאו תוצאות') || body.includes('אין טיסות')) return false;
+            if (body.includes('Access Denied') || body.includes('Service Unavailable')) return false;
 
-            if (sName === 'Air Haifa') {
-                // חיפוש כפתורים שמכילים גם מחיר וגם את המילה "בחירה"
-                const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
-                return buttons.some(b => {
-                    const t = b.innerText;
-                    return t.includes('$') && t.includes('בחירה') && !t.includes('מלאה');
-                });
-            }
-
-            // לוגיקה לישראייר וארקיע
-            const items = Array.from(document.querySelectorAll('.flight-result-item, .item-container, [class*="flight-card"]'));
-            return items.some(el => {
-                const txt = el.innerText;
-                const hasPrice = txt.includes('$') || txt.includes('₪');
-                const isFull = txt.includes('מלאה') || txt.includes('מלא') || txt.includes('Sold');
+            // חיפוש כפתורים או אלמנטים עם מחיר דולרי
+            const elements = Array.from(document.querySelectorAll('button, div, span, a'));
+            
+            return elements.some(el => {
+                const text = el.innerText || "";
+                const hasPrice = text.includes('$') || text.includes('בחירה');
+                const isFull = text.includes('מלאה') || text.includes('Sold');
+                
+                // באייר חיפה המחיר מופיע לרוב בתוך כפתור בחירה
+                if (sName === 'Air Haifa') {
+                    return hasPrice && !isFull && text.length < 100; 
+                }
+                
                 return hasPrice && !isFull;
             });
         }, siteName);
@@ -87,8 +96,7 @@ async function run() {
     const dates = getDynamicDates();
     let results = [];
 
-    // הודעת פתיחה כדי שתדע שהבוט התחיל לעבוד
-    await sendTelegram(`🔍 *סריקה התחילה: ${now}*`);
+    console.log(`Starting scan: ${now}`);
 
     for (const dest of DESTS) {
         for (const date of dates) {
@@ -97,6 +105,7 @@ async function run() {
 
             const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:2135%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId}%7D&startDate=${fmtSlash}&adults=3&children=1`;
             const arkiaUrl = `https://www.arkia.co.il/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1`;
+            const airHaifaUrl = `https://www.airhaifa.com/flight-results/TLV-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0`;
 
             const checkList = [
                 { name: 'ארקיע', url: arkiaUrl },
@@ -104,7 +113,7 @@ async function run() {
             ];
 
             if (dest.airHaifaCode) {
-                checkList.push({ name: 'Air Haifa', url: `https://www.airhaifa.com/flight-results/TLV-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0?breakdown=%7B%7D` });
+                checkList.push({ name: 'Air Haifa', url: airHaifaUrl });
             }
 
             for (const item of checkList) {
@@ -116,9 +125,9 @@ async function run() {
     }
 
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות! *\n\n${results.join('\n---\n')}`);
+        await sendTelegram(`📢 *נמצאו טיסות! (${now})*\n\n${results.join('\n---\n')}`);
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה*\nלא נמצאו טיסות פנויות שעומדות בקריטריונים.`);
+        await sendTelegram(`✅ *סריקה הושלמה (${now})*\nלא נמצאו טיסות פנויות.`);
     }
 }
 
