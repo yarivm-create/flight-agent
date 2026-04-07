@@ -36,34 +36,40 @@ async function sendTelegram(msg) {
 async function checkAvailability(url, siteName) {
     let browser;
     try {
-        browser = await puppeteer.launch({ headless: "new", args: ['--no-sandbox'] });
+        browser = await puppeteer.launch({ 
+            headless: "new", 
+            args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+        });
         const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1');
-        await page.setViewport({ width: 390, height: 844 }); // הדמיית מסך אייפון לפי הצילומים שלך
+        
+        // התחזות מלאה לאייפון כדי לעקוף חסימות של אייר חיפה
+        await page.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1');
+        await page.setViewport({ width: 390, height: 844 });
 
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 50000 });
+        await page.goto(url, { waitUntil: 'networkidle0', timeout: 60000 });
+        
+        // המתנה לטעינת הכפתורים הכחולים של אייר חיפה
         await new Promise(r => setTimeout(r, 25000));
 
         const isAvailable = await page.evaluate((sName) => {
-            // בדיקה כללית אם אין תוצאות
-            if (document.body.innerText.includes('לא נמצאו תוצאות')) return false;
+            const body = document.body.innerText;
+            if (body.includes('לא נמצאו תוצאות') || body.includes('אין טיסות')) return false;
 
-            // עבור אייר חיפה - נחפש את הכפתורים הכחולים מהצילום
             if (sName === 'Air Haifa') {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                return buttons.some(btn => {
-                    const t = btn.innerText;
-                    // חייב להכיל מחיר או מילת בחירה, ואסור שיכיל "מלאה"
-                    return (t.includes('$') || t.includes('בחירה')) && !t.includes('מלאה');
+                // חיפוש כפתורים שמכילים גם מחיר וגם את המילה "בחירה"
+                const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+                return buttons.some(b => {
+                    const t = b.innerText;
+                    return t.includes('$') && t.includes('בחירה') && !t.includes('מלאה');
                 });
             }
 
-            // עבור חברות אחרות
-            const flightItems = Array.from(document.querySelectorAll('.flight-result-item, .item-container, [class*="flight-card"]'));
-            return flightItems.some(el => {
+            // לוגיקה לישראייר וארקיע
+            const items = Array.from(document.querySelectorAll('.flight-result-item, .item-container, [class*="flight-card"]'));
+            return items.some(el => {
                 const txt = el.innerText;
                 const hasPrice = txt.includes('$') || txt.includes('₪');
-                const isFull = txt.includes('מלאה') || txt.includes('מלא') || txt.includes('אזל');
+                const isFull = txt.includes('מלאה') || txt.includes('מלא') || txt.includes('Sold');
                 return hasPrice && !isFull;
             });
         }, siteName);
@@ -81,7 +87,8 @@ async function run() {
     const dates = getDynamicDates();
     let results = [];
 
-    await sendTelegram(`🔍 *התחלת סריקה (${now})*`);
+    // הודעת פתיחה כדי שתדע שהבוט התחיל לעבוד
+    await sendTelegram(`🔍 *סריקה התחילה: ${now}*`);
 
     for (const dest of DESTS) {
         for (const date of dates) {
@@ -109,9 +116,9 @@ async function run() {
     }
 
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות!*\n\n${results.join('\n---\n')}`);
+        await sendTelegram(`📢 *נמצאו טיסות! *\n\n${results.join('\n---\n')}`);
     } else {
-        await sendTelegram(`✅ *סריקה הושלמה*\nלא נמצאו טיסות פנויות.`);
+        await sendTelegram(`✅ *סריקה הושלמה*\nלא נמצאו טיסות פנויות שעומדות בקריטריונים.`);
     }
 }
 
