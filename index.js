@@ -38,49 +38,49 @@ async function checkAvailability(url, siteName) {
     try {
         browser = await puppeteer.launch({ 
             headless: "new", 
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled' // הסוואת הבוט
-            ] 
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled'] 
         });
         const page = await browser.newPage();
-        
-        // התחזות לדפדפן אמיתי לחלוטין
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         await page.setViewport({ width: 1280, height: 800 });
 
-        // מניעת טעינת תמונות וסטייל מיותר כדי לחסוך זמן ומשאבים
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            if (['image', 'font'].includes(req.resourceType())) req.abort();
-            else req.continue();
-        });
-
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-        
-        // המתנה משמעותית לטעינת ה-JavaScript של המחירים
         await new Promise(r => setTimeout(r, 20000));
 
         const isAvailable = await page.evaluate((sName) => {
-            const body = document.body.innerText;
-            if (body.includes('Access Denied') || body.includes('Service Unavailable')) return false;
-
-            // חיפוש כפתורים או אלמנטים עם מחיר דולרי
-            const elements = Array.from(document.querySelectorAll('button, div, span, a'));
+            const bodyText = document.body.innerText;
             
-            return elements.some(el => {
-                const text = el.innerText || "";
-                const hasPrice = text.includes('$') || text.includes('בחירה');
-                const isFull = text.includes('מלאה') || text.includes('Sold');
+            // בדיקת "אין תוצאות" כללית
+            if (bodyText.includes('מצטערים, אין מקומות') || bodyText.includes('לא נמצאו תוצאות')) return false;
+
+            if (sName === 'Air Haifa') {
+                const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+                return buttons.some(b => {
+                    const t = b.innerText;
+                    // חייב להכיל מחיר, ואסור שיכיל "מלאה" בתוך הכפתור
+                    return t.includes('$') && !t.includes('מלאה') && t.includes('בחירה');
+                });
+            }
+
+            if (sName === 'ישראייר') {
+                const flightCards = Array.from(document.querySelectorAll('.flight-result-item, [class*="flight-card"]'));
+                if (flightCards.length === 0) return false;
                 
-                // באייר חיפה המחיר מופיע לרוב בתוך כפתור בחירה
-                if (sName === 'Air Haifa') {
-                    return hasPrice && !isFull && text.length < 100; 
-                }
-                
-                return hasPrice && !isFull;
-            });
+                return flightCards.some(card => {
+                    const t = card.innerText;
+                    // בישראייר המחיר מופיע גם בטיסות מלאות, אז חייבים לוודא שהמדבקה "טיסה מלאה" לא קיימת בכרטיס
+                    const hasPrice = t.includes('$') || t.includes('₪');
+                    const isFull = t.includes('טיסה מלאה') || t.includes('אזל המלאי');
+                    return hasPrice && !isFull;
+                });
+            }
+
+            if (sName === 'ארקיע') {
+                const t = document.body.innerText;
+                return (t.includes('$') || t.includes('₪')) && !t.includes('מלאה');
+            }
+
+            return false;
         }, siteName);
 
         await browser.close();
@@ -105,15 +105,14 @@ async function run() {
 
             const israirUrl = `https://www.israir.co.il/he-IL/reservation/search/flights-abroad/results?origin=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22TLV%22,%22ltravelId%22:2135%7D&destination=%7B%22type%22:%22ltravelId%22,%22destinationType%22:%22CITY%22,%22cityCode%22:%22${dest.code}%22,%22ltravelId%22:${dest.israirId}%7D&startDate=${fmtSlash}&adults=3&children=1`;
             const arkiaUrl = `https://www.arkia.co.il/he/flights-results?CC=FL&IS_BACK_N_FORTH=false&OB_DEP_CITY=TLV&OB_ARV_CITY=${dest.code}&OB_DATE=${date}&ADULTS=3&CHILDREN=1`;
-            const airHaifaUrl = `https://www.airhaifa.com/flight-results/TLV-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0`;
-
+            
             const checkList = [
                 { name: 'ארקיע', url: arkiaUrl },
                 { name: 'ישראייר', url: israirUrl }
             ];
 
             if (dest.airHaifaCode) {
-                checkList.push({ name: 'Air Haifa', url: airHaifaUrl });
+                checkList.push({ name: 'Air Haifa', url: `https://www.airhaifa.com/flight-results/TLV-${dest.airHaifaCode}/${fmtDash}/NA/3/1/0` });
             }
 
             for (const item of checkList) {
@@ -125,7 +124,7 @@ async function run() {
     }
 
     if (results.length > 0) {
-        await sendTelegram(`📢 *נמצאו טיסות! (${now})*\n\n${results.join('\n---\n')}`);
+        await sendTelegram(`📢 *נמצאו טיסות פנויות! (${now})*\n\n${results.join('\n---\n')}`);
     } else {
         await sendTelegram(`✅ *סריקה הושלמה (${now})*\nלא נמצאו טיסות פנויות.`);
     }
